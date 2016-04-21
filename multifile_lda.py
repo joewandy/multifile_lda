@@ -1,85 +1,28 @@
 import cPickle
 import gzip
-import os
-import re
-import sys
 import sys
 import time
 import timeit
 
-from IPython.display import display, HTML
 from numpy import int32
 from numpy.random import RandomState
-from scipy.sparse import coo_matrix
 
-from multifile_feature import MultifileFeatureExtractor
+from multifile_cgs_numpy import sample_numpy
 import multifile_utils as utils
 import numpy as np
-import pandas as pd
+
+# from scipy.sparse import lil_matrix
+# from multifile_cgs_numba import sample_numba
 
 class MultifileLDA(object):
 
-    def __init__(self, random_state=None):
+    def __init__(self, dfs, vocab, random_state=None):
         
         # make sure to get the same results from running gibbs each time
         if random_state is None:
             self.random_state = RandomState(1234567890)
         else:
             self.random_state = random_state    
-
-    def load_all(self, input_set, scaling_factor=100, normalise=0,
-                 fragment_grouping_tol=7, loss_grouping_tol=10, 
-                 loss_threshold_min_count=15, loss_threshold_max_val=200):
-
-        self.F = len(input_set)
-        self.dfs = {}
-        self.ms1s = {}
-        self.ms2s = {}
-        self.Ds = {}
-        self.vocab = None        
-        
-        if len(input_set[0]) == 4:
-            do_feature_extraction = False
-        elif len(input_set[0]) == 2:
-
-            do_feature_extraction = True
-            extractor = MultifileFeatureExtractor(input_set, fragment_grouping_tol, loss_grouping_tol, 
-                                                  loss_threshold_min_count, loss_threshold_max_val)
-            
-            fragment_q = extractor.make_fragment_queue()
-            fragment_groups = extractor.group_features(fragment_q, extractor.fragment_grouping_tol)
-
-            loss_q = extractor.make_loss_queue()
-            loss_groups = extractor.group_features(loss_q, extractor.loss_grouping_tol, check_threshold=True)
-            extractor.create_dataframes(fragment_groups, loss_groups)
-            
-        for f in range(self.F):        
-            
-            entry = input_set[f]
-            if do_feature_extraction:
-                
-                # perform feature extraction
-                extractor.normalise(f, scaling_factor)
-                df, vocab, ms1, ms2 = extractor.get_entry(f)
-                
-            else:
-                
-                # load features that have been extracted            
-                fragment_filename, neutral_loss_filename, ms1_filename, ms2_filename = entry
-                df, vocab, ms1, ms2 = self._load_data(f, fragment_filename, neutral_loss_filename, 
-                                                      ms1_filename, ms2_filename, 
-                                                      scaling_factor, normalise)
-            nrow, ncol = df.shape
-            assert nrow == len(ms1), "df shape %s doesn't match %d" % (df.shape, len(ms1))
-            assert ncol == len(vocab)
-
-            self.Ds[f] = nrow
-            self.dfs[f] = df
-            self.ms1s[f] = ms1
-            self.ms2s[f] = ms2
-            self.vocab = vocab
-            
-    def load_synthetic(self, dfs, vocab):
 
         self.F = len(dfs)
         self.dfs = dfs
@@ -88,71 +31,10 @@ class MultifileLDA(object):
         
         for f in range(self.F):        
             df = self.dfs[f]
-            nrow, ncol = df.shape
+            nrow, _ = df.shape
             self.Ds[f] = nrow
-
-    def _load_data(self, f, fragment_filename, neutral_loss_filename, ms1_filename, ms2_filename, scaling_factor, normalise):
-    
-        print "Loading file " + str(f),
-        fragment_data = pd.read_csv(fragment_filename, index_col=0)
-        neutral_loss_data = pd.read_csv(neutral_loss_filename, index_col=0)
-        
-        ms1 = pd.read_csv(ms1_filename, index_col=0)
-        ms2 = pd.read_csv(ms2_filename, index_col=0)        
-        ms2['fragment_bin_id'] = ms2['fragment_bin_id'].astype(str)
-        ms2['loss_bin_id'] = ms2['loss_bin_id'].astype(str)
-
-        # discretise the fragment and neutral loss intensities values
-        if normalise == 1:
-            data = self._normalise_1(scaling_factor, fragment_data, neutral_loss_data)
-        elif normalise == 2:
-            data = self._normalise_2(scaling_factor, fragment_data, neutral_loss_data, ms1)
-                
-        # get rid of NaNs, transpose the data and floor it
-        data = data.replace(np.nan,0)
-        data = data.transpose()
-        sd = coo_matrix(data)
-        sd = sd.floor()  
-        npdata = np.array(sd.todense(), dtype='int32')
-        print "data shape " + str(npdata.shape)
-        df = pd.DataFrame(npdata)
-        df.columns = data.columns
-        df.index = data.index
-    
-        # vocab is just a string of the column names
-        vocab = data.columns.values
-                
-        return df, vocab, ms1, ms2
-
-    def _normalise_1(self, scaling_factor, fragment_data, neutral_loss_data):
-        
-        # converting it to 0 .. scaling_factor
-        fragment_data *= scaling_factor
-        neutral_loss_data *= scaling_factor
-        data = pd.DataFrame()
-        data = data.append(fragment_data)
-        data = data.append(neutral_loss_data)
-        return data
-    
-    def _normalise_2(self, scaling_factor, fragment_data, neutral_loss_data, ms1):
-
-        # same as method 0, but with additional normalisation by of the parent MS1 intensities ratio
-        fragment_data *= scaling_factor
-        neutral_loss_data *= scaling_factor
-        data = pd.DataFrame()
-        data = data.append(fragment_data)
-        data = data.append(neutral_loss_data)        
-        
-        intensities = ms1['intensity'].values
-        intensity_ratios = intensities/np.max(intensities)
-        n = 0
-        for col in data.columns:
-            data[col] *= intensity_ratios[n]
-            n += 1
-        
-        return data            
             
-    def run(self, K, alpha, beta, n_burn=100, n_samples=200, n_thin=0):
+    def run(self, K, alpha, beta, n_burn, n_samples, n_thin):
         
         self.K = K       
         self.N = len(self.vocab)     
@@ -207,14 +89,11 @@ class MultifileLDA(object):
         sampler_func = None
         try:
             # print "Using Numba for multi-file LDA sampling"
-            # from multifile_cgs_numba import sample_numba
             # sampler_func = sample_numba
             print "Using Numpy for multi-file LDA sampling"
-            from multifile_cgs_numpy import sample_numpy
             sampler_func = sample_numpy
         except Exception:
             print "Using Numpy for multi-file LDA sampling"
-            from multifile_cgs_numpy import sample_numpy
             sampler_func = sample_numpy            
 
         # this will modify the various count matrices (Z, cdk, ckn, cd, ck) inside
@@ -249,7 +128,7 @@ class MultifileLDA(object):
             ordering = np.argsort(topic_dist)
             topic_words = np.array(self.vocab)[ordering][::-1]
             dist = topic_dist[ordering][::-1]        
-            topic_name = 'Mass2Motif {}:'.format(i)
+            topic_name = 'Topic {}:'.format(i)
             
             print topic_name,                    
             for j in range(len(topic_words)):
@@ -284,22 +163,3 @@ class MultifileLDA(object):
             cPickle.dump(self, f, protocol=cPickle.HIGHEST_PROTOCOL)
             stop = timeit.default_timer()
             print "Project saved to " + project_out + " time taken = " + str(stop-start)    
-                          
-def main():    
-    
-    lda = MultifileLDA()
-#     input_set = [
-#                  ('input/beer3pos_fragments_1.csv', 'input/beer3pos_losses_1.csv', 'input/beer3pos_ms1_1.csv','input/beer3pos_ms2_1.csv'),
-#                  ('input/beer3pos_fragments_2.csv', 'input/beer3pos_losses_2.csv', 'input/beer3pos_ms1_2.csv','input/beer3pos_ms2_2.csv'),
-#                  ('input/beer3pos_fragments_3.csv', 'input/beer3pos_losses_3.csv', 'input/beer3pos_ms1_3.csv','input/beer3pos_ms2_3.csv')
-#                  ]
-    input_set = [
-                 ('input/beer3pos_ms1_1.csv','input/beer3pos_ms2_1.csv'),
-                 ('input/beer3pos_ms1_2.csv','input/beer3pos_ms2_2.csv'),
-                 ('input/beer3pos_ms1_3.csv','input/beer3pos_ms2_3.csv')
-                 ]
-    lda.load_all(input_set, scaling_factor=10)    
-    lda.run(300, 0.01, 0.1, n_burn=0, n_samples=20, n_thin=1)
-    lda.plot_e_alphas()
-    
-if __name__ == "__main__": main()

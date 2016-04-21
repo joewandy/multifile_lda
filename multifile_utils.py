@@ -5,6 +5,17 @@ from scipy.special import psi, polygamma
 import numpy as np
 import scipy.io as sio
 
+class flushfile():
+    def __init__(self, f):
+        self.f = f
+    def __getattr__(self,name): 
+        return object.__getattribute__(self.f, name)
+    def write(self, x):
+        self.f.write(x)
+        self.f.flush()
+    def flush(self):
+        self.f.flush()
+        
 # http://stackoverflow.com/questions/2272149/round-to-5-or-other-number-in-python        
 def round_nicely(x, base=5):
     return int(base * round(float(x)/base))

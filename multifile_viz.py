@@ -200,7 +200,7 @@ class MultifileLDAViz(object):
             if topic_id in interesting:
                 rows.append((file_ids[i], topic_id, alphas[i]))
 
-        df = pd.DataFrame(rows, columns=['file', 'M2M', 'alpha'])
-        sns.barplot(x="M2M", y="alpha", hue='file', data=df)
+        df = pd.DataFrame(rows, columns=['file', 'topic', 'alpha'])
+        sns.barplot(x="topic", y="alpha", hue='file', data=df)
                 
         return df
