@@ -4,11 +4,12 @@ import sys
 from multifile_utils import flushfile
 import numpy as np
 import pandas as pd
+import scipy.sparse as ss
 
 oldsysstdout = sys.stdout
 sys.stdout = flushfile(sys.stdout)
 
-class MultifileFeatureExtractor(object):
+class FeatureExtractor(object):
 
     def __init__(self, input_set, fragment_grouping_tol, loss_grouping_tol,
                  loss_threshold_min_count, loss_threshold_max_val,
@@ -16,8 +17,10 @@ class MultifileFeatureExtractor(object):
 
         self.all_ms1 = []
         self.all_ms2 = []
-        self.all_dfs = []
+        self.all_counts = []
+        self.all_doc_labels = []        
         self.vocab = []
+        self.vocab_pos = {}
         self.fragment_grouping_tol = fragment_grouping_tol
         self.loss_grouping_tol = loss_grouping_tol
         self.loss_threshold_min_count = loss_threshold_min_count
@@ -25,35 +28,63 @@ class MultifileFeatureExtractor(object):
 
         # load all the ms1 and ms2 files
         self.F = len(input_set)
-        if input_type == 'filename':
+        if input_type == 'filename': # load from csv file
 
             for ms1_filename, ms2_filename in input_set:
-
                 print "Loading %s" % ms1_filename
                 ms1 = pd.read_csv(ms1_filename, index_col=0)
                 self.all_ms1.append(ms1)
-
                 print "Loading %s" % ms2_filename
                 ms2 = pd.read_csv(ms2_filename, index_col=0)
-                ms2.drop(['fragment_bin_id', 'loss_bin_id'], inplace=True, axis=1)
                 self.all_ms2.append(ms2)
 
-        elif input_type == 'dataframe':
+        elif input_type == 'dataframe': # load from a dataframe
 
             for ms1_df, ms2_df in input_set:
-
                 print "Loading MS1 dataframe %d X %d" % (ms1_df.shape)
                 self.all_ms1.append(ms1_df)
-
                 print "Loading MS2 dataframe %d X %d" % (ms2_df.shape)
                 self.all_ms2.append(ms2_df)
+                
+        for ms1_df in self.all_ms1:
+            ms1_df['peakID'] = ms1_df['peakID'].astype(int)            
+        for ms2_df in self.all_ms2:
+            ms2_df['peakID'] = ms2_df['peakID'].astype(int)            
+
+        # remove old columns that shouldn't be there, if they're present
+        for ms2_df in self.all_ms2:
+            if 'fragment_bin_id' in ms2_df.columns:
+                ms2_df.drop(['fragment_bin_id'], inplace=True, axis=1)
+            if 'loss_bin_id' in ms2_df.columns:
+                ms2_df.drop(['loss_bin_id'], inplace=True, axis=1)
+                                
+        # add the columns back if they aren't there
+        for f in range(self.F):
+            if 'fragment_bin_id' not in ms2_df.columns:
+                self.all_ms2[f]['fragment_bin_id'] = np.nan
+            if 'loss_bin_id' not in ms2_df.columns:
+                self.all_ms2[f]['loss_bin_id'] = np.nan
+                
+        # build a position index of each ms1 and ms2 row's peakID and file
+        self.ms1_pos = {}
+        for f in range(self.F):
+            ms1 = self.all_ms1[f]
+            temp = self._position_index(ms1, f)
+            self.ms1_pos.update(temp)            
+                
+        # build a position index of each ms1 row's peakID and file            
+        self.ms2_pos = {}
+        for f in range(self.F):
+            ms2 = self.all_ms2[f]
+            temp = self._position_index(ms2, f)
+            self.ms2_pos.update(temp)        
 
     def make_fragment_queue(self):
         q = PriorityQueue()
         for f in range(self.F):
             print "Processing fragments for file %d" % f
             ms2 = self.all_ms2[f]
-            for index, row in ms2.iterrows():
+            for _, row in ms2.iterrows():
                 fragment_mz = row['mz']
                 fragment_id = row['peakID']
                 item = (fragment_mz, fragment_id, f, row)
@@ -66,31 +97,27 @@ class MultifileFeatureExtractor(object):
             print "Processing losses for file %d" % f
             ms1 = self.all_ms1[f]
             ms2 = self.all_ms2[f]
-            for index, row in ms2.iterrows():
-                parent_id = row['MSnParentPeakID']
-                parent_row = ms1.loc[ms1['peakID']==parent_id]
+            for _, row in ms2.iterrows():
+                key = (row['MSnParentPeakID'], f)
+                pos = self.ms1_pos[key]
+                parent_row = ms1.iloc[pos]
                 row_mz = row['mz']
                 row_id = row['peakID']
                 parent_mz = parent_row['mz']
-                loss_mz = parent_mz - row_mz
-                loss_mz = loss_mz.values[0]
+                loss_mz = np.abs(parent_mz - row_mz)
                 item = (loss_mz, row_id, f, row)
                 q.put(item)
         return q
 
     def group_features(self, q, grouping_tol, check_threshold=False):
 
-        total_ms2 = len(q.queue)
-
         groups = {}
         k = 0
         group = []
-        unique_check = []
         while not q.empty():
 
             current_item = q.get()
             current_mass = current_item[0]
-            current_id = current_item[1]
             current_file = current_item[2]
             current_row = current_item[3]
             item = (current_row, current_file, current_mass)
@@ -103,31 +130,15 @@ class MultifileFeatureExtractor(object):
                 _, upper = self._mass_range(current_mass, grouping_tol)
                 if head_mass > upper:
 
-                    # check if the current group is valid before starting a new group
-#                     unique_check = set()
-#                     for row, f, val in group:
-#                         this_parent_id = row['MSnParentPeakID']
-#                         this_file_id = f
-#                         key = (this_file_id, this_parent_id)
-#                         if key in unique_check:
-#                             self._print_group(group)
-#                             msg = "Duplicate feature from (file %d, parent %d) already in the bin, maybe change the threshold?" % key
-#                             raise ValueError(msg)
-#                         unique_check.add(key)
-
                     if check_threshold:
                         valid = True
                         if len(group) < self.loss_threshold_min_count:
-                            # print "len(group) = %d < self.loss_threshold_min_count %d" % (len(group), self.loss_threshold_min_count)
                             valid = False
                         if current_mass > self.loss_threshold_max_val:
-                            # print "current_mass %.5f > self.loss_threshold_max_val %f" % (current_mass, self.loss_threshold_max_val)
                             valid = False
                         if valid:
                             groups[k] = group
                             k += 1
-                        # else:
-                            # print "Discard %d" % k
                     else: # nothing to check
                         groups[k] = group
                         k += 1
@@ -140,7 +151,7 @@ class MultifileFeatureExtractor(object):
         print "Total groups=%d" % K
         return groups
 
-    def create_dataframes(self, fragment_groups, loss_groups, sparse=False):
+    def create_counts(self, fragment_groups, loss_groups, scaling_factor):
 
         # initialise fragment vocab
         fragment_group_words = self._generate_words(fragment_groups, 'fragment')
@@ -150,34 +161,33 @@ class MultifileFeatureExtractor(object):
         print "%d loss words" % len(loss_group_words)
         self.vocab.extend(fragment_group_words.values())
         self.vocab.extend(loss_group_words.values())
+        for n in range(len(self.vocab)):
+            w = self.vocab[n]
+            self.vocab_pos[w] = n
 
-        # initialise the dataframes for each file
+        # initialise the count dataframes for each file
         for f in range(self.F):
-            df = self._init_df(f, self.vocab, sparse)
-            self.all_dfs.append(df)
-
+            df, doc_label = self._init_counts(f, self.vocab)
+            self.all_counts.append(df)
+            self.all_doc_labels.append(doc_label)
+            
         # populate the dataframes
         print "Populating dataframes"
-        self._populate_df(fragment_groups, fragment_group_words)
-        self._populate_df(loss_groups, loss_group_words)
+        self._populate_counts(fragment_groups, fragment_group_words)
+        self._populate_counts(loss_groups, loss_group_words)
+        
+        for f in range(self.F):          
 
-    def normalise(self, f, scaling_factor):
+            print "Normalising dataframe %d" % f
+            self._normalise(f, scaling_factor)
 
-        df = self.all_dfs[f]
-
-        column_sums = df.sum(axis=0)
-        df = df.div(column_sums, axis=1) * scaling_factor
-        df = df.transpose()
-        df = df.apply(np.floor)
-        print "file %d data shape %s" % (f, df.shape)
-        self.all_dfs[f] = df
-
-        ms2 = self.all_ms2[f]
-        ms2['fragment_bin_id'] = ms2['fragment_bin_id'].astype(str)
-        ms2['loss_bin_id'] = ms2['loss_bin_id'].astype(str)
+            # ensure that the bin columns are string
+            ms2 = self.all_ms2[f]
+            ms2['fragment_bin_id'] = ms2['fragment_bin_id'].astype(str)
+            ms2['loss_bin_id'] = ms2['loss_bin_id'].astype(str)                
 
     def get_entry(self, f):
-        df = self.all_dfs[f]
+        df = self.all_counts[f]
         vocab = self.vocab
         ms1 = self.all_ms1[f]
         ms2 = self.all_ms2[f]
@@ -189,6 +199,15 @@ class MultifileFeatureExtractor(object):
         mass_end = mass_centre + interval
         return (mass_start, mass_end)
 
+    def _position_index(self, df, f):    
+        peakid_pos = {}
+        pos = 0
+        for _, row in df.iterrows():
+            key = (row['peakID'], f)
+            peakid_pos[key] = pos
+            pos += 1
+        return peakid_pos    
+
     def _get_doc_label(self, mz_val, rt_val, pid_val):
         mz = np.round(mz_val, 5)
         rt = np.round(rt_val, 3)
@@ -197,7 +216,7 @@ class MultifileFeatureExtractor(object):
 
     def _print_group(self, group):
         print "%d members in the group" % len(group)
-        for row, f, val in group:
+        for row, f, _ in group:
             this_parent_id = row['MSnParentPeakID']
             this_file_id = f
             this_peak_id = row['peakID']
@@ -209,7 +228,7 @@ class MultifileFeatureExtractor(object):
         for k in groups:
             group = groups[k]
             group_vals = []
-            for row, f, val in group:
+            for _, _, val in group:
                 group_vals.append(val)
             mean_mz = np.mean(np.array(group_vals))
             rounded_mz = np.round(mean_mz, 5)
@@ -217,7 +236,7 @@ class MultifileFeatureExtractor(object):
             group_words[k] = w
         return group_words
 
-    def _init_df(self, f, vocab, sparse):
+    def _init_counts(self, f, vocab):
 
         # generate column labels
         doc_labels = []
@@ -234,17 +253,13 @@ class MultifileFeatureExtractor(object):
         row_labels = vocab
 
         # create the df with row and col labels
-        if sparse:
-            print "Initialising sparse dataframe %d" % f
-            df = pd.SparseDataFrame(index=row_labels, columns=doc_labels)
-        else:
-            print "Initialising dense dataframe %d" % f
-            df = pd.DataFrame(index=row_labels, columns=doc_labels)
-            df = df.fillna(0) # fill with 0s rather than NaNs
-        return df
+        print "Initialising dense dataframe %d" % f
+        df = pd.DataFrame(index=row_labels, columns=doc_labels)
+        df = df.fillna(0) # fill with 0s rather than NaNs
+        return df, doc_labels
 
-    def _populate_df(self, groups, group_words):
-
+    def _populate_counts(self, groups, group_words):
+                
         for k in groups:
 
             w = group_words[k]
@@ -257,22 +272,95 @@ class MultifileFeatureExtractor(object):
                 print "Populating dataframe for %s group %d/%d" % (word_type, k, len(groups))
 
             group = groups[k]
-            for row, f, val in group:
+            for row, f, _ in group:
 
-                ms1 = self.all_ms1[f]
                 ms2 = self.all_ms2[f]
-                df = self.all_dfs[f]
+                df = self.all_counts[f]
 
                 # update bin column in the original ms2 row
-                pos = (ms2['peakID']==row['peakID'])
+                pid = ms2['peakID'].values[0]
+                key = (pid, f)
+                pos = self.ms2_pos[key]
                 bin_type = word_type + '_bin_id'
-                ms2.loc[pos, bin_type] = word_val
+                col_loc = ms2.columns.get_loc(bin_type)                
+                ms2.iloc[pos, col_loc] = word_val
 
-                # find the column label
-                parent_row = ms1.loc[ ms1['peakID'] == row['MSnParentPeakID'] ]
-                doc_label = self._get_doc_label(parent_row['mz'].values[0],
-                                               parent_row['rt'].values[0],
-                                               parent_row['peakID'].values[0])
+                # find the column and row pos
+                key = (row['MSnParentPeakID'], f)
+                col_pos = self.ms1_pos[key]
+                row_pos = self.vocab_pos[w]
+                
+                # update intensity value
+                self._set_value(df, row_pos, col_pos, row['intensity'])
+                
+    def _set_value(self, counts, row_pos, col_pos, value):
+        counts.iloc[row_pos, col_pos] = value
+                
+    def _normalise(self, f, scaling_factor):
 
-                # update intensity value in the df
-                df.loc[w, doc_label] = row['intensity']
+        df = self.all_counts[f]
+
+        column_sums = df.sum(axis=0)
+        df = df.div(column_sums, axis=1) * scaling_factor
+        df = df.transpose()
+        df = df.apply(np.floor)
+        print "file %d data shape %s" % (f, df.shape)
+        self.all_counts[f] = df
+
+        ms2 = self.all_ms2[f]
+        ms2['fragment_bin_id'] = ms2['fragment_bin_id'].astype(str)
+        ms2['loss_bin_id'] = ms2['loss_bin_id'].astype(str)                
+
+class SparseFeatureExtractor(FeatureExtractor):
+
+    def __init__(self, *args, **kwargs):
+        super(self.__class__, self).__init__(*args, **kwargs)
+            
+    def _init_counts(self, f, vocab):
+
+        # generate column labels
+        doc_labels = []
+        ms1 = self.all_ms1[f]
+        mzs = ms1['mz'].values
+        rts = ms1['rt'].values
+        pids = ms1['peakID'].values
+        n_words = len(ms1)
+        for n in range(n_words):
+            doc_label = self._get_doc_label(mzs[n], rts[n], pids[n])
+            doc_labels.append(doc_label)
+
+        # generate index
+        row_labels = vocab
+
+        # create the df with row and col labels
+        print "Initialising sparse matrix %d" % f
+        n_row = len(row_labels)
+        n_col = len(doc_labels)
+        mat = ss.lil_matrix((n_row, n_col))
+        
+        return mat, doc_labels
+    
+    def _set_value(self, counts, row_pos, col_pos, value):
+        counts[row_pos, col_pos] = value
+        
+    def _normalise(self, f, scaling_factor):
+
+        print "file %d normalising" % f
+        lil = self.all_counts[f]
+        csc = lil.tocsr()
+        s = csc.sum(axis=0)
+        col_sum = np.asarray(s).flatten()
+        _, ys = csc.nonzero()
+        csc.data /= col_sum[ys]
+        csc = csc.multiply(scaling_factor).floor().transpose()
+        print "file %d normalised csc shape %s" % (f, csc.shape)
+
+        # also convert the scipy sparse csc into pandas's sparse dataframe
+        # see http://stackoverflow.com/questions/17818783/populate-a-pandas-sparsedataframe-from-a-scipy-sparse-matrix
+        print "file %d converting csc to sparse dataframe" % f
+        data = [ pd.SparseSeries(csc[i].toarray().ravel()) for i in np.arange(csc.shape[0]) ]
+        df = pd.SparseDataFrame(data, index=self.all_doc_labels[f], columns=self.vocab)
+#         df = pd.DataFrame(index=row_labels, columns=doc_labels)        
+        print "file %d sparse dataframe -- DONE" % f
+        self.all_counts[f] = df
+        
