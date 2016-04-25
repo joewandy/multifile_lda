@@ -1,13 +1,7 @@
 from Queue import PriorityQueue
-import sys
-
-from multifile_utils import flushfile
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
-
-oldsysstdout = sys.stdout
-sys.stdout = flushfile(sys.stdout)
 
 class FeatureExtractor(object):
 
@@ -172,7 +166,7 @@ class FeatureExtractor(object):
             self.all_doc_labels.append(doc_label)
             
         # populate the dataframes
-        print "Populating dataframes"
+        print "Populating the counts"
         self._populate_counts(fragment_groups, fragment_group_words)
         self._populate_counts(loss_groups, loss_group_words)
         
@@ -203,7 +197,7 @@ class FeatureExtractor(object):
         peakid_pos = {}
         pos = 0
         for _, row in df.iterrows():
-            key = (row['peakID'], f)
+            key = (int(row['peakID']), f)
             peakid_pos[key] = pos
             pos += 1
         return peakid_pos    
@@ -260,6 +254,7 @@ class FeatureExtractor(object):
 
     def _populate_counts(self, groups, group_words):
                 
+        i = 0
         for k in groups:
 
             w = group_words[k]
@@ -269,7 +264,7 @@ class FeatureExtractor(object):
 
             assert word_type == 'fragment' or word_type == 'loss'
             if k % 100 == 0:
-                print "Populating dataframe for %s group %d/%d" % (word_type, k, len(groups))
+                print "Populating counts for %s group %d/%d" % (word_type, k, len(groups))
 
             group = groups[k]
             for row, f, _ in group:
@@ -278,7 +273,7 @@ class FeatureExtractor(object):
                 df = self.all_counts[f]
 
                 # update bin column in the original ms2 row
-                pid = ms2['peakID'].values[0]
+                pid = int(row['peakID'])
                 key = (pid, f)
                 pos = self.ms2_pos[key]
                 bin_type = word_type + '_bin_id'
@@ -355,12 +350,12 @@ class SparseFeatureExtractor(FeatureExtractor):
         csc = csc.multiply(scaling_factor).floor().transpose()
         print "file %d normalised csc shape %s" % (f, csc.shape)
 
-        # also convert the scipy sparse csc into pandas's sparse dataframe
-        # see http://stackoverflow.com/questions/17818783/populate-a-pandas-sparsedataframe-from-a-scipy-sparse-matrix
-        print "file %d converting csc to sparse dataframe" % f
-        data = [ pd.SparseSeries(csc[i].toarray().ravel()) for i in np.arange(csc.shape[0]) ]
-        df = pd.SparseDataFrame(data, index=self.all_doc_labels[f], columns=self.vocab)
-#         df = pd.DataFrame(index=row_labels, columns=doc_labels)        
-        print "file %d sparse dataframe -- DONE" % f
-        self.all_counts[f] = df
-        
+#         # too slow when actually creating the sparse df
+#         also convert the scipy sparse csc into pandas's sparse dataframe
+#         see http://stackoverflow.com/questions/17818783/populate-a-pandas-sparsedataframe-from-a-scipy-sparse-matrix
+#         print "file %d converting csc to sparse dataframe" % f
+#         data = [ pd.SparseSeries(csc[i].toarray().ravel()) for i in np.arange(csc.shape[0])]
+#         df = pd.SparseDataFrame(data)
+#         print "file %d sparse dataframe -- DONE" % f
+
+        self.all_counts[f] = csc.tolil()

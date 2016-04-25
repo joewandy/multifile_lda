@@ -8,7 +8,6 @@ from numpy import int32
 from numpy.random import RandomState
 
 from multifile_cgs_numpy import sample_numpy
-import multifile_utils as utils
 import numpy as np
 
 # from scipy.sparse import lil_matrix
@@ -102,50 +101,7 @@ class MultifileLDA(object):
                 self.F, self.Ds, self.N, self.K, self.document_indices,
                 self.alphas, self.beta, self.Z,
                 self.cdk, self.cd, self.ckn, self.ck)
-        
-    def do_thresholding(self, th_doc_topic=0.05, th_topic_word=0.1):
- 
-        # save the thresholding values used for visualisation later
-        self.th_doc_topic = th_doc_topic
-        self.th_topic_word = th_topic_word
-                     
-        # get rid of small values in the matrices of the results
-        # if epsilon > 0, then the specified value will be used for thresholding
-        # otherwise, the smallest value for each row in the matrix is used instead
-        self.thresholded_topic_word = utils.threshold_matrix(self.topic_word_, epsilon=th_topic_word)
-        self.thresholded_doc_topic = []
-        for f in range(len(self.doc_topic_)):
-            self.thresholded_doc_topic.append(utils.threshold_matrix(self.doc_topic_[f], epsilon=th_doc_topic))        
-                
-    def get_top_words(self, with_probabilities=True, selected=None):
-        
-        topic_words_map = {}
-        for i, topic_dist in enumerate(self.thresholded_topic_word):
-            
-            if selected is not None and i not in selected:
-                continue
-            
-            ordering = np.argsort(topic_dist)
-            topic_words = np.array(self.vocab)[ordering][::-1]
-            dist = topic_dist[ordering][::-1]        
-            topic_name = 'Topic {}:'.format(i)
-            
-            print topic_name,                    
-            for j in range(len(topic_words)):
-                if dist[j] > 0:
-                    if with_probabilities:
-                        print '%s (%.3f),' % (topic_words[j], dist[j]),
-                    else:
-                        print('{},'.format(topic_words[j])),                            
-                else:
-                    break
-            print
-            print
-            
-            topic_words_map[i] = (topic_words, dist)
-        
-        return topic_words_map
-            
+                    
     @classmethod
     def resume_from(cls, project_in):
         start = timeit.default_timer()        

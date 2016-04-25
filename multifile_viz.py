@@ -5,13 +5,15 @@ import seaborn as sns
 import matplotlib.patches as mpatches
 from random import uniform
 from __builtin__ import False
+from IPython.display import display, HTML
 
 class MultifileLDAViz(object):
     
-    def __init__(self, lda):
-        self.lda = lda    
+    def __init__(self, analysis):
+        self.analysis = analysis
+        self.lda = analysis.model
 
-    def plot_motif_degrees(self, interesting=None):
+    def plot_motif_degrees(self, interesting=None, min_degree=0):
         
         if interesting is None:
             interesting = [k for k in range(self.lda.K)]            
@@ -19,12 +21,12 @@ class MultifileLDAViz(object):
         file_ids = []
         topic_ids = []
         degrees = []        
-        for f in range(self.lda.F):
+        for f in range(self.analysis.F):
 
-            file_ids.extend([f for k in range(self.lda.K)])
-            topic_ids.extend([k for k in range(self.lda.K)])
+            file_ids.extend([f for k in range(self.analysis.K)])
+            topic_ids.extend([k for k in range(self.analysis.K)])
 
-            doc_topic = self.lda.thresholded_doc_topic[f]
+            doc_topic = self.analysis.thresholded_doc_topic[f]
             columns = (doc_topic>0).sum(0)
             assert len(columns) == self.lda.K
             degrees.extend(columns)
@@ -32,7 +34,7 @@ class MultifileLDAViz(object):
         rows = []
         for i in range(len(topic_ids)):            
             topic_id = topic_ids[i]
-            if topic_id in interesting:
+            if topic_id in interesting and degrees[i]>min_degree:
                 rows.append((file_ids[i], topic_id, degrees[i]))
 
         df = pd.DataFrame(rows, columns=['file', 'M2M', 'degree'])
@@ -60,47 +62,60 @@ class MultifileLDAViz(object):
         else:
             return False
     
-    def plot_docs(self, k, xlim_max=500):
+    def plot_docs(self, k, topic_words_map, topic_docs_map, xlim_max=500, max_docs=None):
 
-        interesting = [k]
-        topic_words_map = self.lda.get_top_words(with_probabilities=True, selected=interesting)
-        topic_words, dist = topic_words_map[k]
-
+        topic_words, topic_words_dist = topic_words_map[k]
         thresholded_topic_words = []
         for j in range(len(topic_words)):
-            if dist[j] > 0:
+            if topic_words_dist[j] > 0:
                 thresholded_topic_words.append(topic_words[j])
 
-        for f in range(self.lda.F): # for each input file
+        topic_name = 'Topic {}:'.format(k)
+        print topic_name,                    
+        for j in range(len(thresholded_topic_words)):
+            print '%s (%.3f),' % (thresholded_topic_words[j], topic_words_dist[j]),
+        print
+        print
 
-            doc_topic = self.lda.thresholded_doc_topic[f]
-            col = doc_topic[:, k]
-            pos = np.nonzero(col)
+        for f in range(self.analysis.F): # for each input file
+
+            doc_topics, doc_topics_dist = topic_docs_map[k]
+            thresholded_docs = []
+            for j in range(len(doc_topics)):
+                if doc_topics_dist[j] > 0 and j < max_docs:
+                    thresholded_docs.append(doc_topics[j])
             
             neutral_loss_positions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
             parent_colour = 'red'
             fragment_colour = 'blue'
             loss_colour = 'green'
             other_colour = 'darkgray'
+            plot_counts = 0
             
-            df = self.lda.ms1s[f].iloc[pos]
-            for index, row in df.iterrows(): # for every fragmentation spectrum
+            for pos in range(len(thresholded_docs)): # for every fragmentation spectrum
 
-                parent_peakid = int(row['peakID'])
-                ms2_rows = self.lda.ms2s[f].loc[self.lda.ms2s[f]['MSnParentPeakID'] == parent_peakid]                
-                # display(ms2_rows)
+                parent_peakid = doc_topics[pos]
+                prob = doc_topics_dist[pos]
+
+                row = self.analysis.ms1s[f].loc[self.analysis.ms1s[f]['peakID'] == parent_peakid]
+                ms2_rows = self.analysis.ms2s[f].loc[self.analysis.ms2s[f]['MSnParentPeakID'] == parent_peakid]
+
+#                 print parent_peakid, prob
+#                 display(row)
+#                 display(ms2_rows)
                 
                 figsize=(10, 6)
                 fig = plt.figure(figsize=figsize)
                 ax = fig.add_subplot(111)
                 
-                parent_mass = row['mz']
-                parent_rt = row['rt']
+                parent_mass = row['mz'].values[0]
+                parent_rt = row['rt'].values[0]
                 parent_intensity = 0.25                
 
                 # plot all
                 masses = ms2_rows['mz'].values
                 intensities = ms2_rows['intensity'].values
+                intensities = intensities/np.max(intensities)
                 num_peaks = len(masses)
                 for j in range(num_peaks):
                     mass = masses[j]
@@ -175,23 +190,25 @@ class MultifileLDAViz(object):
                           fancybox=True, shadow=True)  
                 plt.show()                        
                 plt.close()
-                                                                
+                        
+            break # break per topic
+            
     def plot_e_alphas(self, interesting=None):
 
         if interesting is None:
-            interesting = [k for k in range(self.lda.K)]            
+            interesting = [k for k in range(self.analysis.K)]            
 
         file_ids = []
         topic_ids = []
         alphas = []        
-        for f in range(self.lda.F):
+        for f in range(self.analysis.F):
 
-            file_ids.extend([f for k in range(self.lda.K)])
-            topic_ids.extend([k for k in range(self.lda.K)])
+            file_ids.extend([f for k in range(self.analysis.K)])
+            topic_ids.extend([k for k in range(self.analysis.K)])
 
             post_alpha = self.lda.posterior_alphas[f]
             e_alpha = post_alpha / np.sum(post_alpha)
-            assert len(e_alpha) == self.lda.K
+            assert len(e_alpha) == self.analysis.K
             alphas.extend(e_alpha.tolist())
 
         rows = []
