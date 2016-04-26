@@ -1,11 +1,15 @@
+from __builtin__ import False
+import operator
+from random import uniform
+
+from IPython.display import display, HTML
+
+import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
-import matplotlib.patches as mpatches
-from random import uniform
-from __builtin__ import False
-from IPython.display import display, HTML
+
 
 class MultifileLDAViz(object):
     
@@ -13,34 +17,8 @@ class MultifileLDAViz(object):
         self.analysis = analysis
         self.lda = analysis.model
 
-    def plot_motif_degrees(self, interesting=None, min_degree=0):
-        
-        if interesting is None:
-            interesting = [k for k in range(self.lda.K)]            
-
-        file_ids = []
-        topic_ids = []
-        degrees = []        
-        for f in range(self.analysis.F):
-
-            file_ids.extend([f for k in range(self.analysis.K)])
-            topic_ids.extend([k for k in range(self.analysis.K)])
-
-            doc_topic = self.analysis.thresholded_doc_topic[f]
-            columns = (doc_topic>0).sum(0)
-            assert len(columns) == self.lda.K
-            degrees.extend(columns)
-
-        rows = []
-        for i in range(len(topic_ids)):            
-            topic_id = topic_ids[i]
-            if topic_id in interesting and degrees[i]>min_degree:
-                rows.append((file_ids[i], topic_id, degrees[i]))
-
-        df = pd.DataFrame(rows, columns=['file', 'M2M', 'degree'])
+    def plot_motif_degrees(self, df):
         sns.barplot(x="M2M", y="degree", hue='file', data=df)
-                
-        return df
     
     def get_y_pos(self, intensity):
         if intensity < 0.9:
@@ -62,7 +40,7 @@ class MultifileLDAViz(object):
         else:
             return False
     
-    def plot_docs(self, k, topic_words_map, topic_docs_map, xlim_max=500, max_docs=None):
+    def plot_docs(self, k, topic_words_map, topic_docs_map, citations_count, xlim_max=500, max_docs=None):
 
         topic_words, topic_words_dist = topic_words_map[k]
         thresholded_topic_words = []
@@ -81,21 +59,30 @@ class MultifileLDAViz(object):
 
             doc_topics, doc_topics_dist = topic_docs_map[k]
             thresholded_docs = []
+            counts_cite = []
             for j in range(len(doc_topics)):
                 if doc_topics_dist[j] > 0 and j < max_docs:
-                    thresholded_docs.append(doc_topics[j])
-            
+                    doc_id = doc_topics[j]
+                    counts = citations_count[(k, doc_id)]
+                    thresholded_docs.append(doc_id)                    
+                    counts_cite.append(counts)
+                    
+            thresholded_docs = np.array(thresholded_docs)
+            counts_cite = np.array(counts_cite)
+            ordering = np.argsort(counts_cite)
+            counts_ordered = counts_cite[ordering][::-1]
+            docs_ordered = thresholded_docs[ordering][::-1]
+                        
             neutral_loss_positions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
             parent_colour = 'red'
             fragment_colour = 'blue'
             loss_colour = 'green'
             other_colour = 'darkgray'
-            plot_counts = 0
             
-            for pos in range(len(thresholded_docs)): # for every fragmentation spectrum
+            for pos in range(len(counts_ordered)): # for every fragmentation spectrum
 
-                parent_peakid = doc_topics[pos]
-                prob = doc_topics_dist[pos]
+                parent_peakid = docs_ordered[pos]
+                cc = counts_ordered[pos]
 
                 row = self.analysis.ms1s[f].loc[self.analysis.ms1s[f]['peakID'] == parent_peakid]
                 ms2_rows = self.analysis.ms2s[f].loc[self.analysis.ms2s[f]['MSnParentPeakID'] == parent_peakid]
@@ -176,7 +163,7 @@ class MultifileLDAViz(object):
 
                 # plot the parent last
                 plt.plot((parent_mass, parent_mass), (0, parent_intensity), linewidth=3.0, color=parent_colour)
-                plt.title('File %d MS1 peakid=%d mz=%.5f rt=%.5f' % (f, parent_peakid, parent_mass, parent_rt), y=1.08)
+                plt.title('File %d MS1 peakid=%d mz=%.5f rt=%.5f counts=%d' % (f, parent_peakid, parent_mass, parent_rt, cc), y=1.08)
                 plt.ylim([0, 1.2])
                 if xlim_max is not None:
                     plt.xlim([0, xlim_max])
@@ -190,9 +177,7 @@ class MultifileLDAViz(object):
                           fancybox=True, shadow=True)  
                 plt.show()                        
                 plt.close()
-                        
-            break # break per topic
-            
+                                                    
     def plot_e_alphas(self, interesting=None):
 
         if interesting is None:

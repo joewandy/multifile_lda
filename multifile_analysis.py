@@ -1,8 +1,11 @@
 from multifile_feature import FeatureExtractor
 from multifile_lda import MultifileLDA
 import multifile_utils as utils
+import pandas as pd
+import seaborn as sns
 import numpy as np
-from astropy.modeling.core import Model
+from IPython.display import display, HTML
+
 
 class MultifileAnalysis(object):
     
@@ -104,19 +107,20 @@ class MultifileAnalysis(object):
         else:
             self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_, epsilon=th_doc_topic))        
             
-    def get_top_words(self, with_probabilities=True, selected=None, verbose=True):
+    def get_top_words(self, with_probabilities=True, selected=None, verbose=True, limit=None):
         
         topic_words_map = {}
-        for i, topic_dist in enumerate(self.thresholded_topic_word):
+        for k, topic_dist in enumerate(self.thresholded_topic_word):
             
-            if selected is not None and i not in selected:
+            if selected is not None and k not in selected:
                 continue
             
             ordering = np.argsort(topic_dist)
             topic_words = np.array(self.vocab)[ordering][::-1]
             dist = topic_dist[ordering][::-1]        
-            topic_name = 'Topic {}:'.format(i)
+            topic_name = 'Topic {}:'.format(k)
             
+            # TODO: vectorise this
             if verbose:
                 print topic_name,                    
                 for j in range(len(topic_words)):
@@ -129,25 +133,34 @@ class MultifileAnalysis(object):
                         break
                 print
                 print
-            
-            topic_words_map[i] = (topic_words, dist)
+            else:
+                for j in range(len(topic_words)):
+                    if dist[j] == 0:
+                        break
+                
+            if limit is not None and limit < j:
+                j = limit
+            topic_words = topic_words[:j]
+            dist = dist[:j]
+            topic_words_map[k] = (topic_words, dist)
         
         return topic_words_map
 
-    def get_top_docs(self, f, with_probabilities=True, selected=None, verbose=True):
+    def get_top_docs(self, f, with_probabilities=True, selected=None, verbose=True, limit=None):
 
         ms1_peakid = self.ms1s[f]['peakID'].values        
         topic_docs_map = {}
-        for i, topic_dist in enumerate(self.thresholded_doc_topic[f].transpose()):
+        for k, topic_dist in enumerate(self.thresholded_doc_topic[f].transpose()):
             
-            if selected is not None and i not in selected:
+            if selected is not None and k not in selected:
                 continue
             
             ordering = np.argsort(topic_dist)
             topic_docs = np.array(ms1_peakid)[ordering][::-1]
             dist = topic_dist[ordering][::-1]        
-            topic_name = 'Topic {}:'.format(i)
-            
+            topic_name = 'Topic {}:'.format(k)
+ 
+            # TODO: vectorise this           
             if verbose:
                 print topic_name,                    
                 for j in range(len(topic_docs)):
@@ -160,7 +173,121 @@ class MultifileAnalysis(object):
                         break
                 print
                 print
-            
-            topic_docs_map[i] = (topic_docs, dist)
+            else:
+                for j in range(len(topic_docs)):
+                    if dist[j] == 0:
+                        break                
+                
+            if limit is not None and limit < j:
+                j = limit
+            topic_docs = topic_docs[:j]
+            dist = dist[:j]            
+            topic_docs_map[k] = (topic_docs, dist)
         
         return topic_docs_map
+    
+    def get_rankings(self, interesting=None, min_degree=0):
+        
+        if interesting is None:
+            interesting = [k for k in range(self.K)]            
+
+        file_ids = []
+        topic_ids = []
+        degrees = []        
+        h_indices = []
+        doc_citations = []
+        for f in range(self.F): # for each file
+
+            file_ids.extend([f for k in range(self.K)])
+            topic_ids.extend([k for k in range(self.K)])
+
+            # compute the degrees of all topics
+            doc_topic = self.thresholded_doc_topic[f]
+            columns = (doc_topic>0).sum(0)
+            assert len(columns) == self.K
+            degrees.extend(columns)
+
+            # compute the h-indices of all topics
+            columns, citations = self._h_index(f)
+            h_indices.extend(columns)
+            doc_citations.append(citations)
+
+        rows = []
+        for i in range(len(topic_ids)):            
+            topic_id = topic_ids[i]
+            if topic_id in interesting and degrees[i]>min_degree:
+                rows.append((file_ids[i], topic_id, degrees[i], h_indices[i]))
+
+        df = pd.DataFrame(rows, columns=['file', 'M2M', 'degree', 'h-index'])                
+        return df, doc_citations
+
+    # compute the h-index of topics TODO: this only works for fragment and loss words!
+    def _h_index(self, f):
+
+        h_indices = []     
+        doc_citations = {}
+        topic_words_map = self.get_top_words(verbose=False)
+        topic_docs_map = self.get_top_docs(f, verbose=False)
+        
+        ks = range(self.K)
+        for k in ks:
+
+            # find the top words and documents in this topic above the threshold              
+            top_words, _ = topic_words_map[k]
+            top_docs, _ = topic_docs_map[k]
+            
+            topic_words = {}
+            for word in top_words:
+                topic_words[word] = 0
+            
+            # handle empty topics
+            if len(top_docs) == 0:
+                h_indices.append(0)
+                continue
+            else:
+            
+                # now find out how many of the documents in this topic actually 'cite' the words    
+                for parent_peakid in top_docs:
+    
+                    # find all the fragment peaks of this parent peak
+                    ms2_rows = self.ms2s[f].loc[self.ms2s[f]['MSnParentPeakID']==parent_peakid]
+                    fragment_bin_ids = ms2_rows[['fragment_bin_id']]
+                    loss_bin_ids = ms2_rows[['loss_bin_id']]       
+                    
+                    # convert from pandas dataframes to list
+                    fragment_bin_ids = fragment_bin_ids.values.ravel().tolist()
+                    loss_bin_ids = loss_bin_ids.values.ravel().tolist()
+                                        
+                    # convert to set for quick lookup
+                    word_set = set()
+                    for bin_id in fragment_bin_ids:
+                        new_word = 'fragment_%s' % bin_id
+                        word_set.add(new_word)
+                    for bin_id in loss_bin_ids:
+                        new_word = 'loss_%s' % bin_id
+                        word_set.add(new_word)                        
+
+                    # count the citation numbers     
+                    doc_citing = 0                           
+                    for word in topic_words:
+                        if word in word_set:
+                            topic_words[word] += 1
+                            doc_citing += 1
+                    doc_citations[(k, parent_peakid)] = doc_citing
+                    
+                    # make a dataframe of the articles & citation counts
+                    df = pd.DataFrame(topic_words, index=['counts']).transpose()
+                    df = df.sort(['counts'], ascending=False)
+                    
+                    # compute the h-index
+                    h_index = 0
+                    for index, row in df.iterrows():
+                        if row['counts'] > h_index:
+                            h_index += 1
+                        else:
+                            break
+
+                print 'k=%d h-index=%d' % (k, h_index)                        
+                h_indices.append(h_index)
+            
+        return h_indices, doc_citations
