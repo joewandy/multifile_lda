@@ -2,6 +2,7 @@ from Queue import PriorityQueue
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
+import math
 
 class FeatureExtractor(object):
 
@@ -85,22 +86,51 @@ class FeatureExtractor(object):
                 q.put(item)
         return q
 
-    def make_loss_queue(self):
+    def make_loss_queue(self, mode='POS'):
         q = PriorityQueue()
         for f in range(self.F):
             print "Processing losses for file %d" % f
             ms1 = self.all_ms1[f]
             ms2 = self.all_ms2[f]
             for _, row in ms2.iterrows():
+                
                 key = (row['MSnParentPeakID'], f)
                 pos = self.ms1_pos[key]
                 parent_row = ms1.iloc[pos]
                 row_mz = row['mz']
                 row_id = row['peakID']
                 parent_mz = parent_row['mz']
-                loss_mz = np.abs(parent_mz - row_mz)
+
+                # extract charge value to correct the m/z value for loss calculation
+                if 'charge' in parent_row:
+                    parent_charge = parent_row['charge'] # this is either float('nan') or an str, e.g. '2+'
+                    nan_value = pd.isnull(parent_charge)
+                    if nan_value:
+                        parent_charge = 1 if mode == 'POS' else -1
+                    else:
+                        cleaned = parent_charge.replace('+', '')
+                        int_val = int(cleaned)
+                        parent_charge = int_val
+                else:
+                    parent_charge = 1 if mode == 'POS' else -1
+                
+                # MW is the molecular mass, n is the charge and H+ is the mass of a proton
+                # we want to turn the parent MS1 m/z value into (MW + H+), having 1+ charge, 
+                # because we assume all the MS2 fragment peaks have 1+ charge too
+                #
+                # starts with
+                # m/z                 = (MW + nH+)/n
+                #
+                # (m/z * n)           = (MW + nH+)
+                # (m/z * n)           = (MW + (n-1)H+ + H+)
+                # (m/z * n) - (n-1)H+ = (MW + H+)
+                PROTON_MASS = 1.00727645199076
+                corrected_mass = (parent_mz*parent_charge) - (parent_charge-1)*PROTON_MASS
+
+                loss_mz = np.abs(corrected_mass - row_mz)
                 item = (loss_mz, row_id, f, row)
                 q.put(item)
+            
         return q
 
     def group_features(self, q, grouping_tol, check_threshold=False):
