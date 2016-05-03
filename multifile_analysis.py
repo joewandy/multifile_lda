@@ -1,11 +1,16 @@
-from multifile_feature import FeatureExtractor
-from multifile_lda import MultifileLDA
-import multifile_utils as utils
+import timeit
+import time
+import gzip
+import cPickle
+
 import pandas as pd
 import seaborn as sns
 import numpy as np
 from IPython.display import display, HTML
 
+from multifile_feature import FeatureExtractor
+from multifile_lda import MultifileLDA
+import multifile_utils as utils
 
 class MultifileAnalysis(object):
 
@@ -90,6 +95,24 @@ class MultifileAnalysis(object):
         self.K = K
         return lda
 
+    @classmethod
+    def resume_from(cls, project_in):
+        start = timeit.default_timer()
+        with gzip.GzipFile(project_in, 'rb') as f:
+            obj = cPickle.load(f)
+            stop = timeit.default_timer()
+            print "Project loaded from " + project_in + " time taken = " + str(stop-start)
+            return obj
+
+    def save_project(self, project_out, message=None):
+        start = timeit.default_timer()
+        self.last_saved_timestamp = str(time.strftime("%c"))
+        self.message = message
+        with gzip.GzipFile(project_out, 'wb') as f:
+            cPickle.dump(self, f, protocol=cPickle.HIGHEST_PROTOCOL)
+            stop = timeit.default_timer()
+            print "Project saved to " + project_out + " time taken = " + str(stop-start)
+
     def do_thresholding(self, th_doc_topic=0.05, th_topic_word=0.1):
 
         # save the thresholding values used for visualisation later
@@ -102,7 +125,7 @@ class MultifileAnalysis(object):
         self.thresholded_topic_word = utils.threshold_matrix(self.model.topic_word_, epsilon=th_topic_word)
         self.thresholded_doc_topic = []
         if type(self.model.doc_topic_) is list:
-            for f in range(len(self.doc_topic_)):
+            for f in range(len(self.model.doc_topic_)):
                 self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_[f], epsilon=th_doc_topic))
         else:
             self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_, epsilon=th_doc_topic))
