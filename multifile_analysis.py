@@ -8,7 +8,7 @@ import seaborn as sns
 import numpy as np
 from IPython.display import display, HTML
 
-from multifile_feature import FeatureExtractor
+from multifile_feature import SparseFeatureExtractor
 from multifile_lda import MultifileLDA
 import multifile_utils as utils
 
@@ -24,15 +24,15 @@ class MultifileAnalysis(object):
         self.Ds = {}
         self.vocab = None
 
-    def load_data(self, input_set, scaling_factor=100, normalise=0,
-                 fragment_grouping_tol=7, loss_grouping_tol=10,
-                 loss_threshold_min_count=15, loss_threshold_max_val=200,
-                 input_type='filename'):
+    def load_data(self, input_set, scaling_factor,
+                fragment_grouping_tol, loss_grouping_tol,
+                loss_threshold_min_count, loss_threshold_max_val,
+                normalise=0, input_type='filename'):
 
         self.F = len(input_set)
-        extractor = FeatureExtractor(input_set, fragment_grouping_tol, loss_grouping_tol,
+        extractor = SparseFeatureExtractor(input_set, fragment_grouping_tol, loss_grouping_tol,
                                      loss_threshold_min_count, loss_threshold_max_val,
-                                     input_type)
+                                     input_type=input_type)
 
         fragment_q = extractor.make_fragment_queue()
         fragment_groups = extractor.group_features(fragment_q, extractor.fragment_grouping_tol)

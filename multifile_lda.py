@@ -66,7 +66,7 @@ class MultifileLDA(object):
                 if d%10==0:
                     sys.stdout.write('.')
                     sys.stdout.flush()
-                document = self.dfs[f].iloc[[d]]
+                document = self.dfs[f][d, :]
                 word_idx = utils.word_indices(document)
                 word_locs = []
                 for pos, n in enumerate(word_idx):
