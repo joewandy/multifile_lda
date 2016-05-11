@@ -124,11 +124,8 @@ class MultifileAnalysis(object):
         # otherwise, the smallest value for each row in the matrix is used instead
         self.thresholded_topic_word = utils.threshold_matrix(self.model.topic_word_, epsilon=th_topic_word)
         self.thresholded_doc_topic = []
-        if type(self.model.doc_topic_) is list:
-            for f in range(len(self.model.doc_topic_)):
-                self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_[f], epsilon=th_doc_topic))
-        else:
-            self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_, epsilon=th_doc_topic))
+        for f in range(len(self.model.doc_topic_)):
+            self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_[f], epsilon=th_doc_topic))
 
     def get_top_words(self, with_probabilities=True, selected=None, verbose=True, limit=None):
 
