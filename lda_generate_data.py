@@ -3,6 +3,7 @@ See example usage in the main method of lda_cgs.py
 """
 from numpy import int64
 from pandas.core.frame import DataFrame
+from scipy import sparse
 
 import numpy as np
 import pylab as plt
@@ -50,28 +51,26 @@ class LdaDataGenerator(object):
 
             return d
         
-        def generate_input_df(self, n_topics, vocab_size, document_length, n_docs, n_copies):
+        def generate_input_counts(self, n_topics, vocab_size, document_length, n_docs, n_copies):
                         
-            print "Generating input DF"
+            print "Generating count matrices"
                         
             # word_dists is the topic x document_length matrix
             word_dists = self.generate_word_dists(n_topics, vocab_size, document_length)                        
 
-            dfs = []
+            counts = []
             for j in range(n_copies):
             
                 # generate each document x terms vector
-                docs = np.zeros((vocab_size, n_docs), dtype=int64)
+                docs = np.zeros((n_docs, vocab_size), dtype=int64)
                 for i in range(n_docs):
-                    docs[:, i] = self.generate_document(word_dists, n_topics, vocab_size, document_length)
-                                    
-                df = DataFrame(docs)
-                df = df.transpose()
-                dfs.append(df)
+                    docs[i] = self.generate_document(word_dists, n_topics, vocab_size, document_length)         
+                lil = sparse.lil_matrix(docs)
+                counts.append(lil)
                 
-                print df.shape            
+                print lil.shape
                 if self.make_plot:
-                    self._plot_nicely(df, 'Documents_%d X Words' % j, 'Words', 'Documents')
+                    self._plot_nicely(lil.todense(), 'Documents_%d X Words' % j, 'Words', 'Documents')
             
             # generate the vocab
             vocab = []            
@@ -80,7 +79,7 @@ class LdaDataGenerator(object):
                 vocab.append(word)
             vocab = np.array(vocab)            
 
-            return dfs, vocab
+            return counts, vocab
         
         def generate_from_file(self, df_infile, vocab_infile):
             

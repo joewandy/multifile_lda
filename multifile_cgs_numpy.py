@@ -5,12 +5,16 @@ from multifile_utils import estimate_alpha_from_counts
 
 import numpy as np
 import pylab as plt
+from collections import namedtuple
+
+Sample = namedtuple('Sample', 'cdks ckn')
 
 def sample_numpy(random_state, n_burn, n_samples, n_thin, 
             F, Ds, N, K, document_indices, 
             alphas, beta, Z,
             cdk, cd, ckn, ck):    
 
+    samples = []
     all_files_ckn = np.zeros_like(ckn[0])
     all_files_ck = np.zeros_like(ck[0])
     items = []
@@ -97,44 +101,35 @@ def sample_numpy(random_state, n_burn, n_samples, n_thin,
             
             counter += 1
 
-        thin += 1                
-        if s>n_burn and thin%n_thin==0: 
-            ll = 0
-            ll += p_w_z(F, N, K, beta, N_beta, all_files_ckn, all_files_ck)
-            for ll_f in range(F):
-                f_D = Ds[ll_f]
-                f_alpha = alphas[ll_f]
-                f_cdk = cdk[ll_f]
-                f_cd = cd[ll_f]
-                f_K_alpha = np.sum(f_alpha)
-                ll += p_z(f_D, K, f_alpha, f_K_alpha, f_cdk, f_cd)                  
-            print(" Log likelihood = %.3f " % ll)
-            lls.append(ll)
-        else:
-            print
+        ll = 0
+        ll += p_w_z(F, N, K, beta, N_beta, all_files_ckn, all_files_ck)
+        for ll_f in range(F):
+            f_D = Ds[ll_f]
+            f_alpha = alphas[ll_f]
+            f_cdk = cdk[ll_f]
+            f_cd = cd[ll_f]
+            f_K_alpha = np.sum(f_alpha)
+            ll += p_z(f_D, K, f_alpha, f_K_alpha, f_cdk, f_cd)                  
+        print(" Log likelihood = %.3f " % ll)
+        lls.append(ll)
 
-    thetas = []
-    posterior_alphas = []            
-    for f in range(F):
-        
-        file_D = Ds[f]
-        file_cdk = cdk[f]
-        file_alpha = alphas[f]        
+        # store all the samples after thinning
+        if n_burn > 0 and s > n_burn:
+            thin += 1
+            if thin%n_thin==0:                    
+                cdks_copy = np.array([cdk[f].copy() for f in range(F)])
+                ckn_copy = np.copy(all_files_ckn)
+                to_store = Sample(cdks_copy, ckn_copy)
+                samples.append(to_store)
 
-        # update theta for this file
-        theta = file_cdk + file_alpha 
-        theta /= np.sum(theta, axis=1)[:, np.newaxis]
-        thetas.append(theta)
-        
-        # update alpha for this file
-        alpha_new = estimate_alpha_from_counts(file_D, K, file_alpha, file_cdk)
-        posterior_alphas.append(alpha_new)
-            
-    # update phi for all files
-    phi = all_files_ckn + beta
-    phi /= np.sum(phi, axis=1)[:, np.newaxis]
-    
-    return phi, thetas, posterior_alphas, np.array(lls)
+    # store the last sample only
+    if n_burn == 0:
+        cdks_copy = np.array([cdk[f].copy() for f in range(F)])
+        ckn_copy = np.copy(all_files_ckn)
+        to_store = Sample(cdks_copy, ckn_copy)
+        samples.append(to_store)
+
+    return np.array(lls), samples
 
 def p_w_z(F, N, K, beta, N_beta, all_files_ckn, all_files_ck):
     val = K * ( gammaln(N_beta) - np.sum(gammaln(beta)) )

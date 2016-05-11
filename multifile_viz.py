@@ -189,7 +189,7 @@ class MultifileLDAViz(object):
             file_ids.extend([f for k in range(self.analysis.K)])
             topic_ids.extend([k for k in range(self.analysis.K)])
 
-            post_alpha = self.lda.posterior_alphas[f]
+            post_alpha = self.lda.mean_alpha[f]
             e_alpha = post_alpha / np.sum(post_alpha)
             assert len(e_alpha) == self.analysis.K
             alphas.extend(e_alpha.tolist())
@@ -202,5 +202,36 @@ class MultifileLDAViz(object):
 
         df = pd.DataFrame(rows, columns=['file', 'topic', 'alpha'])
         sns.barplot(x="topic", y="alpha", hue='file', data=df)
+
+        return df
+
+    def plot_boxplot_alphas(self, interesting=None):
+
+        if interesting is None:
+            interesting = [k for k in range(self.analysis.K)]
+
+        file_ids = []
+        topic_ids = []
+        alphas = []
+        for f in range(self.analysis.F):
+
+            for post_alpha in self.lda.posterior_alphas:
+
+                file_ids.extend([f for k in range(self.analysis.K)])
+                topic_ids.extend([k for k in range(self.analysis.K)])
+
+                post_alpha = self.lda.mean_alpha[f]
+                e_alpha = post_alpha / np.sum(post_alpha)
+                assert len(e_alpha) == self.analysis.K
+                alphas.extend(e_alpha.tolist())
+
+        rows = []
+        for i in range(len(topic_ids)):
+            topic_id = topic_ids[i]
+            if topic_id in interesting:
+                rows.append((file_ids[i], topic_id, alphas[i]))
+
+        df = pd.DataFrame(rows, columns=['file', 'topic', 'alpha'])
+        sns.boxplot(x="topic", y="alpha", hue='file', data=df)
 
         return df
