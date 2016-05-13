@@ -36,14 +36,14 @@ class MultifileLDA(object):
             df = self.dfs[f]
             nrow, _ = df.shape
             self.Ds[f] = nrow
-            
+
         self.samples = [] # store the samples
 
-    def run(self, K, alpha, beta, n_burn, n_samples, n_thin):
+    def run(self, K, alpha, beta, n_burn, n_samples, n_thin, use_last_sample=False):
 
         self.K = K
         self.N = len(self.vocab)
-        
+
         self.n_burn = n_burn
         self.n_thin = n_thin
         if self.n_burn == 0:
@@ -114,7 +114,7 @@ class MultifileLDA(object):
                 self.cdk, self.cd, self.ckn, self.ck)
 
         # global phi, file-specific theta, posterior alpha per file
-        self.topic_word_, self.doc_topic_, self.mean_alpha, self.posterior_alphas = self._update_parameters()
+        self.topic_word_, self.doc_topic_, self.mean_alpha, self.posterior_alphas = self._update_parameters(use_last_sample=use_last_sample)
 
     @classmethod
     def resume_from(cls, project_in):
@@ -133,44 +133,47 @@ class MultifileLDA(object):
             cPickle.dump(self, f, protocol=cPickle.HIGHEST_PROTOCOL)
             stop = timeit.default_timer()
             print "Project saved to " + project_out + " time taken = " + str(stop-start)
-            
-    def _process_sample(self, sample): 
+
+    def _process_sample(self, sample):
 
         cdks = sample.cdks
         all_files_ckn = sample.ckn
         alphas = self.alphas
 
         thetas = []
-        posterior_alphas = []            
+        posterior_alphas = []
         for f in range(self.F):
-            
+
             file_D = self.Ds[f]
             file_cdk = cdks[f]
-            file_alpha = alphas[f]        
-    
+            file_alpha = alphas[f]
+
             # update theta for this file
-            theta = file_cdk + file_alpha 
+            theta = file_cdk + file_alpha
             theta /= np.sum(theta, axis=1)[:, np.newaxis]
             thetas.append(theta)
-            
+
             # update alpha for this file
             alpha_new = estimate_alpha_from_counts(file_D, self.K, file_alpha, file_cdk)
             posterior_alphas.append(alpha_new)
-        
+
         thetas = np.array(thetas)
-                
+
         # update phi for all files
         phi = all_files_ckn + self.beta
         phi /= np.sum(phi, axis=1)[:, np.newaxis]
-               
-        return phi, thetas, posterior_alphas
-    
-    def _update_parameters(self):
 
-        # use the last sample only
-        if len(self.samples) == 1:
-            print "S=" + str(len(self.samples)) + ", using only the last sample."
-            last_samp = self.samples[0]
+        return phi, thetas, posterior_alphas
+
+    def _update_parameters(self, use_last_sample=False):
+
+        if use_last_sample: # use the last sample only
+            if len(self.samples) == 1:
+                print "S=" + str(len(self.samples)) + ", using only the last sample."
+                last_samp = self.samples[0]
+            else:
+                print "S=" + str(len(self.samples)) + ", selecting the last sample."
+                last_samp = self.samples[-1]
             phi, thetas, alpha_new = self._process_sample(last_samp)
             return phi, thetas, alpha_new, [alpha_new]
 
@@ -178,38 +181,38 @@ class MultifileLDA(object):
         all_phis = []
         all_thetas = []
         all_alphas = []
-        for samp in self.samples:            
+        for samp in self.samples:
             phi, thetas, alpha_new = self._process_sample(samp)
             all_phis.append(phi)
             all_thetas.append(thetas)
-            if not np.isnan(alpha_new).any():           
+            if not np.isnan(alpha_new).any():
                 all_alphas.append(alpha_new)
 
-        # TODO: vectorize all the loops below        
+        # TODO: vectorize all the loops below
         # average over the results
         S = len(self.samples)
-        
+
         print "Averaging over topic_words"
         avg_theta = np.zeros_like(all_thetas[0])
         for theta in all_thetas:
             avg_theta += theta
-        avg_theta /= len(thetas)
+        avg_theta /= S
         sys.stdout.flush()
 
         print "Averaging over doc_topics"
         avg_phi = np.zeros_like(all_phis[0])
         for phi in all_phis:
             avg_phi += phi
-        avg_phi /= len(all_phis)
+        avg_phi /= S
         sys.stdout.flush()
 
         print "Averaging over posterior alphas"
         avg_posterior_alpha = 0
-        if len(all_alphas)>0:        
+        if len(all_alphas)>0:
             avg_posterior_alpha = np.zeros_like(all_alphas[0])
             for alpha in all_alphas:
                 avg_posterior_alpha += alpha
-            avg_posterior_alpha /= len(all_alphas)
+            avg_posterior_alpha /= S
         sys.stdout.flush()
-        
+
         return avg_phi, avg_theta, avg_posterior_alpha, all_alphas

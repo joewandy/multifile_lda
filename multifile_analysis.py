@@ -87,13 +87,21 @@ class MultifileAnalysis(object):
             self.ms1s[f] = ms1
             self.ms2s[f] = ms2
 
-    def run(self, K, alpha, beta, n_burn=100, n_samples=200, n_thin=0):
+    def run(self, K, alpha, beta, n_burn=100, n_samples=200, n_thin=0, use_last_sample=False):
 
         lda = MultifileLDA(self.counts, self.vocab)
-        lda.run(K, alpha, beta, n_burn, n_samples, n_thin)
+        lda.run(K, alpha, beta, n_burn, n_samples, n_thin, use_last_sample=use_last_sample)
         self.model = lda
         self.K = K
         return lda
+
+    def update_parameters(use_last_sample=False):
+        topic_word, doc_topic, mean_alpha, posterior_alphas = self.model.\
+                _update_parameters(use_last_sample=use_last_sample)
+        self.model.topic_word_ = topic_word
+        self.model.doc_topic_ = doc_topic
+        self.model.mean_alpha = mean_alpha
+        self.model.posterior_alphas = posterior_alphas
 
     @classmethod
     def resume_from(cls, project_in):
