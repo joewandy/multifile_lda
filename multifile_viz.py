@@ -4,6 +4,7 @@ from random import uniform
 
 from IPython.display import display, HTML
 
+import csv
 import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
@@ -175,6 +176,42 @@ class MultifileLDAViz(object):
                       fancybox=True, shadow=True)
             plt.show()
             plt.close()
+
+    def print_docs(self, analysis, k, topic_docs_map, filename):
+
+        data = []
+        row = ('file', 'id', 'mz', 'RT', 'intensity')
+        data.append(row)
+
+        for f in range(analysis.F):
+
+            topic_docs_map = analysis.get_top_docs(f, verbose=False)
+
+            # find all documents above the threshold
+            doc_topics, doc_topics_dist = topic_docs_map[k]
+            thresholded_docs = []
+            for j in range(len(doc_topics)):
+                if doc_topics_dist[j] > 0:
+                    doc_id = doc_topics[j]
+                    thresholded_docs.append(doc_id)
+
+            for parent_peakid in thresholded_docs:
+
+                row = self.analysis.ms1s[f].loc[self.analysis.ms1s[f]['peakID'] == parent_peakid]
+                parent_mass = row['mz'].values[0]
+                parent_rt = row['rt'].values[0]
+                parent_intensity = row['intensity'].values[0]
+
+                row = (f, parent_peakid, parent_mass, parent_rt, parent_intensity)
+                data.append(row)
+
+                msg = 'File %d MS1 peakid=%d mz=%.5f rt=%.5f intensity=%f' % row
+                print msg
+
+        with open(filename, 'w') as fp:
+            a = csv.writer(fp, delimiter=',')
+            a.writerows(data)
+            print 'CSV written to %s' % filename
 
     def plot_e_alphas(self, interesting=None):
 
