@@ -257,8 +257,8 @@ class MultifileLDAViz(object):
                 file_ids.extend([f for k in range(self.analysis.K)])
                 topic_ids.extend([k for k in range(self.analysis.K)])
 
-                post_alpha = self.lda.mean_alpha[f]
-                e_alpha = post_alpha / np.sum(post_alpha)
+                file_post_alpha = post_alpha[f]
+                e_alpha = file_post_alpha / np.sum(file_post_alpha)
                 assert len(e_alpha) == self.analysis.K
                 alphas.extend(e_alpha.tolist())
 

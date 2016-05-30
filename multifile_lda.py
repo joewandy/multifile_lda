@@ -212,7 +212,7 @@ class MultifileLDA(object):
             avg_posterior_alpha = np.zeros_like(all_alphas[0])
             for alpha in all_alphas:
                 avg_posterior_alpha += alpha
-            avg_posterior_alpha /= S
+            avg_posterior_alpha /= len(all_alphas)
         sys.stdout.flush()
 
         return avg_phi, avg_theta, avg_posterior_alpha, all_alphas
