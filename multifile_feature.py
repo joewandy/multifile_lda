@@ -108,7 +108,7 @@ class FeatureExtractor(object):
                     if nan_value:
                         parent_charge = 1 if mode == 'POS' else -1
                     else:
-                        cleaned = parent_charge.replace('+', '')
+                        cleaned = parent_charge.replace('+', '') # get rid of '+'
                         int_val = int(cleaned)
                         parent_charge = int_val
                 else:
@@ -128,6 +128,8 @@ class FeatureExtractor(object):
                 corrected_mass = (parent_mz*parent_charge) - (parent_charge-1)*PROTON_MASS
 
                 loss_mz = np.abs(corrected_mass - row_mz)
+                # print parent_mz, parent_charge, corrected_mass, loss_mz
+
                 item = (loss_mz, row_id, f, row)
                 q.put(item)
 

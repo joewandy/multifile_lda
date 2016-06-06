@@ -41,7 +41,8 @@ class MultifileLDAViz(object):
         else:
             return False
 
-    def plot_docs(self, k, f, topic_words_map, topic_docs_map, citations_count, xlim_max=500, max_docs=None):
+    def plot_docs(self, k, f, topic_words_map, topic_docs_map, citations_count,
+        xlim_max=500, max_docs=None, plot_loss=True):
 
         topic_words, topic_words_dist = topic_words_map[k]
         thresholded_topic_words = []
@@ -72,7 +73,6 @@ class MultifileLDAViz(object):
         counts_ordered = counts_cite[ordering][::-1]
         docs_ordered = thresholded_docs[ordering][::-1]
 
-        neutral_loss_positions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         parent_colour = 'red'
         fragment_colour = 'blue'
         loss_colour = 'green'
@@ -135,30 +135,31 @@ class MultifileLDAViz(object):
                                 horizontalalignment='center', verticalalignment='top', alpha=0.75)
 
             # plot the losses explained by the topic
-            neutral_loss_count = 0
-            words = ms2_rows['loss_bin_id'].values
-            for j in range(num_peaks):
-                mass = masses[j]
-                intensity = intensities[j]
-                w = 'loss_%s' % words[j]
-                if w in thresholded_topic_words:
+            if plot_loss:
+                neutral_loss_count = 0
+                words = ms2_rows['loss_bin_id'].values
+                for j in range(num_peaks):
+                    mass = masses[j]
+                    intensity = intensities[j]
+                    w = 'loss_%s' % words[j]
+                    if w in thresholded_topic_words:
 
-                    # draw the neutral loss arrow
-                    arrow_x1 = parent_mass
-                    arrow_y1 = neutral_loss_positions[neutral_loss_count]
-                    arrow_x2 = (mass-parent_mass)+5
-                    arrow_y2 = 0
-                    neutral_loss_count += 1
-                    plt.arrow(arrow_x1, arrow_y1, arrow_x2, arrow_y2, head_width=0.05, head_length=4.0,
-                              width=0.005, fc=loss_colour, ec=loss_colour)
+                        # draw the neutral loss arrow
+                        arrow_x1 = parent_mass
+                        arrow_y1 = (neutral_loss_count+1)*0.1
+                        arrow_x2 = (mass-parent_mass)+5
+                        arrow_y2 = 0
+                        neutral_loss_count += 1
+                        plt.arrow(arrow_x1, arrow_y1, arrow_x2, arrow_y2, head_width=0.05, head_length=4.0,
+                                  width=0.005, fc=loss_colour, ec=loss_colour)
 
-                    # draw neutral loss label
-                    text_x = mass+(parent_mass-mass)/4
-                    text_y = arrow_y1+0.025
-                    loss_str = w.split('_')[1]
-                    loss_str = "%.4f" % float(loss_str)
-                    t = ax.text(text_x, text_y, loss_str, ha="left", va="center", rotation=0,
-                                color=loss_colour, fontweight='bold')
+                        # draw neutral loss label
+                        text_x = mass+(parent_mass-mass)/4
+                        text_y = arrow_y1+0.025
+                        loss_str = w.split('_')[1]
+                        loss_str = "%.4f" % float(loss_str)
+                        t = ax.text(text_x, text_y, loss_str, ha="left", va="center", rotation=0,
+                                    color=loss_colour, fontweight='bold')
 
             # plot the parent last
             plt.plot((parent_mass, parent_mass), (0, parent_intensity), linewidth=3.0, color=parent_colour)
@@ -170,10 +171,13 @@ class MultifileLDAViz(object):
             parent_patch = mpatches.Patch(color=parent_colour, label='Parent peak')
             other_patch = mpatches.Patch(color=other_colour, label='Fragment peaks')
             fragment_patch = mpatches.Patch(color=fragment_colour, label='Topic fragment')
-            loss_patch = mpatches.Patch(color=loss_colour, label='Topic loss')
-            plt.legend(handles=[parent_patch, other_patch, fragment_patch, loss_patch],
-                       frameon=True, loc='center left', bbox_to_anchor=(1.0, 0.5),
-                      fancybox=True, shadow=True)
+            if plot_loss:
+                loss_patch = mpatches.Patch(color=loss_colour, label='Topic loss')
+                handles = [parent_patch, other_patch, fragment_patch, loss_patch]
+            else:
+                handles = [parent_patch, other_patch, fragment_patch]
+            plt.legend(handles=handles, frameon=True, loc='center left',
+                bbox_to_anchor=(1.0, 0.5), fancybox=True, shadow=True)
             plt.show()
             plt.close()
 
