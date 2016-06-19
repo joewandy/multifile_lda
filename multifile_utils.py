@@ -11,6 +11,7 @@ def round_nicely(x, base=5):
 
 def threshold_matrix(matrix, epsilon=0.0):
     thresholded = matrix.copy()
+    print thresholded.shape
     n_row, n_col = thresholded.shape
     for i in range(n_row):
         row = thresholded[i, :]

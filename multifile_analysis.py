@@ -137,8 +137,14 @@ class MultifileAnalysis(object):
         if type(self.model.doc_topic_) is list:
             for f in range(len(self.model.doc_topic_)):
                 self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_[f], epsilon=th_doc_topic))
-        else: # doc_topic_ is a single numpy array, produced from the single-file LDA
-            self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_, epsilon=th_doc_topic))
+        else:
+            # doc_topic_ is a one-dimensional numpy array, where each element is a numpy array for each file
+            if self.model.doc_topic_.ndim == 1:
+                for f in range(len(self.model.doc_topic_)):
+                    self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_[f], epsilon=th_doc_topic))
+            else:
+                # doc_topic_ is a single numpy array, produced from the single-file LDA
+                self.thresholded_doc_topic.append(utils.threshold_matrix(self.model.doc_topic_, epsilon=th_doc_topic))
 
     def get_top_words(self, with_probabilities=True, selected=None, verbose=True, limit=None):
 
