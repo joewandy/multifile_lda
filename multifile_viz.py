@@ -246,7 +246,7 @@ class MultifileLDAViz(object):
 
         return df
 
-    def plot_boxplot_alphas(self, interesting=None):
+    def plot_boxplot_alphas(self, interesting=None, title=None, saveto=None):
 
         if interesting is None:
             interesting = [k for k in range(self.analysis.K)]
@@ -272,7 +272,13 @@ class MultifileLDAViz(object):
             if topic_id in interesting:
                 rows.append((file_ids[i], topic_id, alphas[i]))
 
-        df = pd.DataFrame(rows, columns=['file', 'topic', 'alpha'])
-        sns.boxplot(x="topic", y="alpha", hue='file', data=df)
+        df = pd.DataFrame(rows, columns=['file', 'Mass2Motif', 'alpha'])
+        sns.boxplot(x="Mass2Motif", y="alpha", hue='file', data=df)
+
+        if title is not None:
+            plt.title(title)
+
+        if saveto is not None:
+            plt.savefig(saveto)
 
         return df
