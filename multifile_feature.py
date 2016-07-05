@@ -100,35 +100,7 @@ class FeatureExtractor(object):
                 row_mz = row['mz']
                 row_id = row['peakID']
                 parent_mz = parent_row['mz']
-
-                # extract charge value to correct the m/z value for loss calculation
-                if 'charge' in parent_row:
-                    parent_charge = parent_row['charge'] # this is either float('nan') or an str, e.g. '2+'
-                    nan_value = pd.isnull(parent_charge)
-                    if nan_value:
-                        parent_charge = 1 if mode == 'POS' else -1
-                    else:
-                        cleaned = parent_charge.replace('+', '') # get rid of '+'
-                        int_val = int(cleaned)
-                        parent_charge = int_val
-                else:
-                    parent_charge = 1 if mode == 'POS' else -1
-
-                # MW is the molecular mass, n is the charge and H+ is the mass of a proton
-                # we want to turn the parent MS1 m/z value into (MW + H+), having 1+ charge,
-                # because we assume all the MS2 fragment peaks have 1+ charge too
-                #
-                # starts with
-                # m/z                 = (MW + nH+)/n
-                #
-                # (m/z * n)           = (MW + nH+)
-                # (m/z * n)           = (MW + (n-1)H+ + H+)
-                # (m/z * n) - (n-1)H+ = (MW + H+)
-                PROTON_MASS = 1.00727645199076
-                corrected_mass = (parent_mz*parent_charge) - (parent_charge-1)*PROTON_MASS
-
-                loss_mz = np.abs(corrected_mass - row_mz)
-                # print parent_mz, parent_charge, corrected_mass, loss_mz
+                loss_mz = np.abs(parent_mz - row_mz)
 
                 item = (loss_mz, row_id, f, row)
                 q.put(item)
